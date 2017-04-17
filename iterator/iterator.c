@@ -1886,7 +1886,7 @@ processQueryTargets(struct module_qstate* qstate, struct iter_qstate* iq,
 	}
 	
 	/* ASN: If we have a AAAA query, then also query for A records */
-	if((ie->aaaa_filter) && (iq->qchase.qtype == LDNS_RR_TYPE_AAAA) &&
+	if((ie->aaaa_filter == 1) && (iq->qchase.qtype == LDNS_RR_TYPE_AAAA) &&
 		(iq->fetch_a_for_aaaa == 0)) {
 		return next_state(iq, ASN_FETCH_A_FOR_AAAA_STATE);
 	}

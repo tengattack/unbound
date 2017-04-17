@@ -1145,9 +1145,9 @@ server_caps_whitelist: VAR_CAPS_WHITELIST STRING_ARG
 server_aaaa_filter: VAR_AAAA_FILTER STRING_ARG
 	{
 		OUTYY(("P(server_aaaa_filter:%s)\n", $2));
-		if(strcmp($2, "yes") != 0 && strcmp($2, "no") != 0)
-			yyerror("expected yes or no.");
-		else cfg_parser->cfg->aaaa_filter = (strcmp($2, "yes")==0);
+		if(strcmp($2, "0") != 0 && strcmp($2, "1") != 0 && strcmp($2, "2") != 0)
+			yyerror("expected 0, 1 or 2.");
+		else cfg_parser->cfg->aaaa_filter = atoi($2);
 		free($2);
 	}
 	;

@@ -625,13 +625,13 @@ static int sanitize_nsec_is_overreach(struct rrset_parse* rrset,
  */
 static int
 asn_lookup_a_record_from_cache(struct query_info* qinfo,
-	struct module_env* env, struct iter_env* ie)
+	struct module_env* env, struct iter_env* ie, uint16_t rr_type)
 {
 	struct ub_packed_rrset_key* akey;
 
 	/* get cached A records for queried name */
 	akey = rrset_cache_lookup(env->rrset_cache, qinfo->qname,
-		qinfo->qname_len, LDNS_RR_TYPE_A, qinfo->qclass,
+		qinfo->qname_len, rr_type, qinfo->qclass,
 		0, *env->now, 0);
 	if(akey) { /* we had some. */
 		log_rrset_key(VERB_ALGO, "ASN-AAAA-filter: found A record",
@@ -698,9 +698,12 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 	}
 
 	/* ASN: Locate any A record we can find */
-	if((ie->aaaa_filter) && (qinfo->qtype == LDNS_RR_TYPE_AAAA)) {
+	if((ie->aaaa_filter == 1) && (qinfo->qtype == LDNS_RR_TYPE_AAAA)) {
 		found_a_record = asn_lookup_a_record_from_cache(qinfo,
-			env, ie);
+			env, ie, LDNS_RR_TYPE_A);
+	} else if((ie->aaaa_filter == 2) && (qinfo->qtype == LDNS_RR_TYPE_A)) {
+		found_a_record = asn_lookup_a_record_from_cache(qinfo,
+			env, ie, LDNS_RR_TYPE_AAAA);
 	}
 	/* ASN: End of added code */
 
@@ -716,7 +719,7 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 	while(rrset) {
 
 		/* ASN: For AAAA records only... */
-		if((ie->aaaa_filter) && (rrset->type == LDNS_RR_TYPE_AAAA)) {
+		if((ie->aaaa_filter == 1) && (rrset->type == LDNS_RR_TYPE_AAAA)) {
 			/* ASN: If this is not a AAAA query, then remove AAAA
 			 * records, no questions asked. If this IS a AAAA query
 			 * then remove AAAA records if we have an A record.
@@ -730,6 +733,20 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 			log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: "
 				"keep AAAA for", zonename,
 				LDNS_RR_TYPE_AAAA, qinfo->qclass);
+		} else if((ie->aaaa_filter == 2) && (rrset->type == LDNS_RR_TYPE_A)) {
+			/* ASN: If this is not a A query, then remove A
+			 * records, no questions asked. If this IS a A query
+			 * then remove A records if we have an AAAA record.
+			 * Otherwise, leave things be. */
+			if((qinfo->qtype != LDNS_RR_TYPE_A) ||
+				(found_a_record)) {
+				remove_rrset("ASN-AAAA-filter: removing A "
+					"for record", pkt, msg, prev, &rrset);
+				continue;
+			}
+			log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: "
+				"keep A for", zonename,
+				LDNS_RR_TYPE_A, qinfo->qclass);
 		}
 		/* ASN: End of added code */
 

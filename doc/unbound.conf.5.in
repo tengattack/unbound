@@ -694,12 +694,14 @@ potentially broken nameservers. A lot of domains will not be resolvable when
 this option in enabled. Only use if you know what you are doing.
 This option only has effect when qname-minimisation is enabled. Default is off.
 .TP
-.B aaaa\-filter: \fI<yes or no>
-Activate behavior similar to BIND's AAAA-filter.
+.B aaaa\-filter: \fI<0, 1 or 2>
+Activate behavior similar to BIND's AAAA-filter for value 1.
 This forces the dropping of all AAAA records, unless in the case of
 explicit AAAA queries, when no A records have been confirmed.
 This also causes an additional A query to be sent for each AAAA query.
 This breaks DNSSEC!
+It will treat as A-filter for value 2.
+This forces the dropping of all A records if it has AAAA record.
 .TP
 .B private\-address: \fI<IP address or subnet>
 Give IPv4 of IPv6 addresses or classless subnets. These are addresses
