@@ -194,6 +194,7 @@ config_create(void)
 	cfg->harden_algo_downgrade = 0;
 	cfg->use_caps_bits_for_id = 0;
 	cfg->caps_whitelist = NULL;
+	cfg->aaaa_filter = 0; /* ASN: default is disabled */
 	cfg->private_address = NULL;
 	cfg->private_domain = NULL;
 	cfg->unwanted_threshold = 0;

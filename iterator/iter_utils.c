@@ -175,6 +175,7 @@ iter_apply_cfg(struct iter_env* iter_env, struct config_file* cfg)
 	}
 	iter_env->supports_ipv6 = cfg->do_ip6;
 	iter_env->supports_ipv4 = cfg->do_ip4;
+	iter_env->aaaa_filter = cfg->aaaa_filter;
 	return 1;
 }
 

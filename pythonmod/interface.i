@@ -851,6 +851,7 @@ struct config_file {
    int harden_dnssec_stripped;
    int harden_referral_path;
    int use_caps_bits_for_id;
+   int aaaa_filter; /* ASN */
    struct config_strlist* private_address;
    struct config_strlist* private_domain;
    size_t unwanted_threshold;

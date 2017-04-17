@@ -95,6 +95,7 @@ extern struct config_parser_state* cfg_parser;
 %token VAR_STATISTICS_CUMULATIVE VAR_OUTGOING_PORT_PERMIT 
 %token VAR_OUTGOING_PORT_AVOID VAR_DLV_ANCHOR_FILE VAR_DLV_ANCHOR
 %token VAR_NEG_CACHE_SIZE VAR_HARDEN_REFERRAL_PATH VAR_PRIVATE_ADDRESS
+%token VAR_AAAA_FILTER
 %token VAR_PRIVATE_DOMAIN VAR_REMOTE_CONTROL VAR_CONTROL_ENABLE
 %token VAR_CONTROL_INTERFACE VAR_CONTROL_PORT VAR_SERVER_KEY_FILE
 %token VAR_SERVER_CERT_FILE VAR_CONTROL_KEY_FILE VAR_CONTROL_CERT_FILE
@@ -194,6 +195,7 @@ content_server: server_num_threads | server_verbosity | server_port |
 	server_dlv_anchor_file | server_dlv_anchor | server_neg_cache_size |
 	server_harden_referral_path | server_private_address |
 	server_private_domain | server_extended_statistics | 
+	server_aaaa_filter |
 	server_local_data_ptr | server_jostle_timeout | 
 	server_unwanted_reply_threshold | server_log_time_ascii | 
 	server_domain_insecure | server_val_sig_skew_min | 
@@ -1138,6 +1140,15 @@ server_caps_whitelist: VAR_CAPS_WHITELIST STRING_ARG
 		OUTYY(("P(server_caps_whitelist:%s)\n", $2));
 		if(!cfg_strlist_insert(&cfg_parser->cfg->caps_whitelist, $2))
 			yyerror("out of memory");
+	}
+	;
+server_aaaa_filter: VAR_AAAA_FILTER STRING_ARG
+	{
+		OUTYY(("P(server_aaaa_filter:%s)\n", $2));
+		if(strcmp($2, "yes") != 0 && strcmp($2, "no") != 0)
+			yyerror("expected yes or no.");
+		else cfg_parser->cfg->aaaa_filter = (strcmp($2, "yes")==0);
+		free($2);
 	}
 	;
 server_private_address: VAR_PRIVATE_ADDRESS STRING_ARG

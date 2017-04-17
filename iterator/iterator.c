@@ -1791,6 +1791,53 @@ processDSNSFind(struct module_qstate* qstate, struct iter_qstate* iq, int id)
 
 	return 0;
 }
+
+/**
+ * ASN: This event state was added as an intermediary step between
+ * QUERYTARGETS_STATE and the next step, in order to cast a subquery for the
+ * purpose of caching A records for the queried name.
+ * 
+ * @param qstate: query state.
+ * @param iq: iterator query state.
+ * @param ie: iterator shared global environment.
+ * @param id: module id.
+ * @return true if the event requires more request processing immediately,
+ *         false if not. This state only returns true when it is generating
+ *         a SERVFAIL response because the query has hit a dead end.
+ */
+static int
+asn_processQueryAAAA(struct module_qstate* qstate, struct iter_qstate* iq,
+	struct iter_env* ie, int id)
+{
+	struct module_qstate* subq = NULL;
+
+	log_assert(iq->fetch_a_for_aaaa == 0);
+
+	/* flag the query properly in order to not loop */
+	iq->fetch_a_for_aaaa = 1;
+
+	/* re-throw same query, but with a different type */
+	if(!generate_sub_request(iq->qchase.qname,
+        	iq->qchase.qname_len, LDNS_RR_TYPE_A,
+		iq->qchase.qclass, qstate, id, iq,
+		INIT_REQUEST_STATE, FINISHED_STATE, &subq, 1)) {
+		log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: failed "
+			"preloading of A record for",
+			iq->qchase.qname, LDNS_RR_TYPE_A,
+			iq->qchase.qclass);
+		return error_response(qstate, id, LDNS_RCODE_SERVFAIL);
+	}
+	log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: "
+		"preloading records in cache for",
+		iq->qchase.qname, LDNS_RR_TYPE_A,
+		iq->qchase.qclass);
+
+	/* set this query as waiting */
+	qstate->ext_state[id] = module_wait_subquery;
+	/* at this point break loop */
+	return 0;
+}
+/* ASN: End of added code */
 	
 /** 
  * This is the request event state where the request will be sent to one of
@@ -1838,6 +1885,13 @@ processQueryTargets(struct module_qstate* qstate, struct iter_qstate* iq,
 		return error_response(qstate, id, LDNS_RCODE_SERVFAIL);
 	}
 	
+	/* ASN: If we have a AAAA query, then also query for A records */
+	if((ie->aaaa_filter) && (iq->qchase.qtype == LDNS_RR_TYPE_AAAA) &&
+		(iq->fetch_a_for_aaaa == 0)) {
+		return next_state(iq, ASN_FETCH_A_FOR_AAAA_STATE);
+	}
+	/* ASN: End of added code */
+
 	/* Make sure we have a delegation point, otherwise priming failed
 	 * or another failure occurred */
 	if(!iq->dp) {
@@ -3033,6 +3087,62 @@ processFinished(struct module_qstate* qstate, struct iter_qstate* iq,
 	return 0;
 }
 
+/** 
+ * ASN: Do final processing on responses to A queries originated from AAAA
+ * queries. Events reach this state after the iterative resolution algorithm
+ * terminates.
+ * This is required down the road to decide whether to scrub AAAA records
+ * from the results or not.
+ *
+ * @param qstate: query state.
+ * @param id: module id.
+ * @param forq: super query state.
+ */
+static void
+asn_processAAAAResponse(struct module_qstate* qstate, int id,
+	struct module_qstate* super)
+{
+	struct iter_qstate* iq = (struct iter_qstate*)qstate->minfo[id];
+	struct iter_qstate* super_iq = (struct iter_qstate*)super->minfo[id];
+	struct ub_packed_rrset_key* rrset;
+	struct delegpt_ns* dpns = NULL;
+	int error = (qstate->return_rcode != LDNS_RCODE_NOERROR);
+
+	log_assert(super_iq->fetch_a_for_aaaa > 0);
+
+	/* let super go to evaluation of targets after this */
+	super_iq->state = QUERYTARGETS_STATE;
+
+	log_query_info(VERB_ALGO, "ASN-AAAA-filter: processAAAAResponse",
+		&qstate->qinfo);
+	log_query_info(VERB_ALGO, "ASN-AAAA-filter: processAAAAResponse super",
+		&super->qinfo);
+
+	if(super_iq->dp)
+		dpns = delegpt_find_ns(super_iq->dp,
+			qstate->qinfo.qname, qstate->qinfo.qname_len);
+	if (!dpns) {
+		/* not interested */
+		verbose(VERB_ALGO, "ASN-AAAA-filter: subq: %s, but parent not "
+			"interested%s", (error ? "error, but" : "success"),
+			(super_iq->dp ? "anymore" : " (was reset)"));
+		log_query_info(VERB_ALGO, "ASN-AAAA-filter: superq", &super->qinfo);
+		if(super_iq->dp && error)
+			delegpt_log(VERB_ALGO, super_iq->dp);
+		return;
+	} else if (error) {
+		verbose(VERB_ALGO, "ASN-AAAA-filter: mark as failed, "
+			"and go to target query.");
+		/* see if the failure did get (parent-lame) info */
+		if(!cache_fill_missing(super->env,
+			super_iq->qchase.qclass, super->region,
+			super_iq->dp))
+		log_err("ASN-AAAA-filter: out of memory adding missing");
+		dpns->resolved = 1; /* mark as failed */
+	}
+}
+/* ASN: End of added code */
+
 /*
  * Return priming query results to interestes super querystates.
  * 
@@ -3052,6 +3162,9 @@ iter_inform_super(struct module_qstate* qstate, int id,
 	else if(super->qinfo.qtype == LDNS_RR_TYPE_DS && ((struct iter_qstate*)
 		super->minfo[id])->state == DSNS_FIND_STATE)
 		processDSNSResponse(qstate, id, super);
+	else if (super->qinfo.qtype == LDNS_RR_TYPE_AAAA && ((struct iter_qstate*)
+		super->minfo[id])->state == ASN_FETCH_A_FOR_AAAA_STATE)
+		asn_processAAAAResponse(qstate, id, super);
 	else if(qstate->return_rcode != LDNS_RCODE_NOERROR)
 		error_supers(qstate, id, super);
 	else if(qstate->is_priming)
@@ -3088,6 +3201,9 @@ iter_handle(struct module_qstate* qstate, struct iter_qstate* iq,
 				break;
 			case INIT_REQUEST_3_STATE:
 				cont = processInitRequest3(qstate, iq, id);
+				break;
+			case ASN_FETCH_A_FOR_AAAA_STATE:
+				cont = asn_processQueryAAAA(qstate, iq, ie, id);
 				break;
 			case QUERYTARGETS_STATE:
 				cont = processQueryTargets(qstate, iq, ie, id);
@@ -3398,6 +3514,8 @@ iter_state_to_string(enum iter_state state)
 		return "INIT REQUEST STATE (stage 2)";
 	case INIT_REQUEST_3_STATE:
 		return "INIT REQUEST STATE (stage 3)";
+	case ASN_FETCH_A_FOR_AAAA_STATE:
+		return "ASN_FETCH_A_FOR_AAAA_STATE";
 	case QUERYTARGETS_STATE :
 		return "QUERY TARGETS STATE";
 	case PRIME_RESP_STATE :
@@ -3422,6 +3540,7 @@ iter_state_is_responsestate(enum iter_state s)
 		case INIT_REQUEST_STATE :
 		case INIT_REQUEST_2_STATE :
 		case INIT_REQUEST_3_STATE :
+		case ASN_FETCH_A_FOR_AAAA_STATE :
 		case QUERYTARGETS_STATE :
 		case COLLECT_CLASS_STATE :
 			return 0;

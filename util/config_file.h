@@ -207,6 +207,8 @@ struct config_file {
 	int use_caps_bits_for_id;
 	/** 0x20 whitelist, domains that do not use capsforid */
 	struct config_strlist* caps_whitelist;
+	/** ASN: enable AAAA filter? */
+	int aaaa_filter;
 	/** strip away these private addrs from answers, no DNS Rebinding */
 	struct config_strlist* private_address;
 	/** allow domain (and subdomains) to use private address space */

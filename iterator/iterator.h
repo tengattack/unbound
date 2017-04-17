@@ -130,6 +130,9 @@ struct iter_env {
 	 */
 	int* target_fetch_policy;
 
+	/** ASN: AAAA-filter flag */
+	int aaaa_filter;
+
 	/** ip6.arpa dname in wireformat, used for qname-minimisation */
 	uint8_t* ip6arpa_dname;
 };
@@ -178,6 +181,14 @@ enum iter_state {
 	 * through this naturally as the 3rd part of the INIT_REQUEST_STATE.
 	 */
 	INIT_REQUEST_3_STATE,
+
+	/**
+	 * This state is responsible for intercepting AAAA queries,
+	 * and launch a A subquery on the same target, to populate the
+	 * cache with A records, so the AAAA filter scrubbing logic can
+	 * work.
+	 */
+	ASN_FETCH_A_FOR_AAAA_STATE,
 
 	/**
 	 * Each time a delegation point changes for a given query or a 
@@ -362,6 +373,13 @@ struct iter_qstate {
 	 * be used when creating the state. A higher one will be attempted.
 	 */
 	int refetch_glue;
+
+	/**
+	 * ASN: This is a flag that, if true, means that this query is
+	 * for fetching A records to populate cache and determine if we must
+	 * return AAAA records or not.
+	 */
+	int fetch_a_for_aaaa;
 
 	/** list of pending queries to authoritative servers. */
 	struct outbound_list outlist;

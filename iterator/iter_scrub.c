@@ -617,6 +617,32 @@ static int sanitize_nsec_is_overreach(struct rrset_parse* rrset,
 }
 
 /**
+ * ASN: Lookup A records from rrset cache.
+ * @param qinfo: the question originally asked.
+ * @param env: module environment with config and cache.
+ * @param ie: iterator environment with private address data.
+ * @return 0 if no A record found, 1 if A record found.
+ */
+static int
+asn_lookup_a_record_from_cache(struct query_info* qinfo,
+	struct module_env* env, struct iter_env* ie)
+{
+	struct ub_packed_rrset_key* akey;
+
+	/* get cached A records for queried name */
+	akey = rrset_cache_lookup(env->rrset_cache, qinfo->qname,
+		qinfo->qname_len, LDNS_RR_TYPE_A, qinfo->qclass,
+		0, *env->now, 0);
+	if(akey) { /* we had some. */
+		log_rrset_key(VERB_ALGO, "ASN-AAAA-filter: found A record",
+			      akey);
+		lock_rw_unlock(&akey->entry.lock);
+		return 1;
+	}
+	return 0;
+}
+
+/**
  * Given a response event, remove suspect RRsets from the response.
  * "Suspect" rrsets are potentially poison. Note that this routine expects
  * the response to be in a "normalized" state -- that is, all "irrelevant"
@@ -635,6 +661,7 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 	struct query_info* qinfo, uint8_t* zonename, struct module_env* env,
 	struct iter_env* ie)
 {
+	int found_a_record = 0; /* ASN: do we have a A record? */
 	int del_addi = 0; /* if additional-holding rrsets are deleted, we
 		do not trust the normalized additional-A-AAAA any more */
 	struct rrset_parse* rrset, *prev;
@@ -670,6 +697,13 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 		rrset = rrset->rrset_all_next;
 	}
 
+	/* ASN: Locate any A record we can find */
+	if((ie->aaaa_filter) && (qinfo->qtype == LDNS_RR_TYPE_AAAA)) {
+		found_a_record = asn_lookup_a_record_from_cache(qinfo,
+			env, ie);
+	}
+	/* ASN: End of added code */
+
 	/* At this point, we brutally remove ALL rrsets that aren't 
 	 * children of the originating zone. The idea here is that, 
 	 * as far as we know, the server that we contacted is ONLY 
@@ -680,6 +714,24 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 	prev = NULL;
 	rrset = msg->rrset_first;
 	while(rrset) {
+
+		/* ASN: For AAAA records only... */
+		if((ie->aaaa_filter) && (rrset->type == LDNS_RR_TYPE_AAAA)) {
+			/* ASN: If this is not a AAAA query, then remove AAAA
+			 * records, no questions asked. If this IS a AAAA query
+			 * then remove AAAA records if we have an A record.
+			 * Otherwise, leave things be. */
+			if((qinfo->qtype != LDNS_RR_TYPE_AAAA) ||
+				(found_a_record)) {
+				remove_rrset("ASN-AAAA-filter: removing AAAA "
+					"for record", pkt, msg, prev, &rrset);
+				continue;
+			}
+			log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: "
+				"keep AAAA for", zonename,
+				LDNS_RR_TYPE_AAAA, qinfo->qclass);
+		}
+		/* ASN: End of added code */
 
 		/* remove private addresses */
 		if( (rrset->type == LDNS_RR_TYPE_A || 
