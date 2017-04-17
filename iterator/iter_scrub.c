@@ -698,10 +698,10 @@ scrub_sanitize(sldns_buffer* pkt, struct msg_parse* msg,
 	}
 
 	/* ASN: Locate any A record we can find */
-	if((ie->aaaa_filter == 1) && (qinfo->qtype == LDNS_RR_TYPE_AAAA)) {
+	if(ie->aaaa_filter == 1) {
 		found_a_record = asn_lookup_a_record_from_cache(qinfo,
 			env, ie, LDNS_RR_TYPE_A);
-	} else if((ie->aaaa_filter == 2) && (qinfo->qtype == LDNS_RR_TYPE_A)) {
+	} else if(ie->aaaa_filter == 2) {
 		found_a_record = asn_lookup_a_record_from_cache(qinfo,
 			env, ie, LDNS_RR_TYPE_AAAA);
 	}
