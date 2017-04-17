@@ -189,6 +189,7 @@ enum iter_state {
 	 * work.
 	 */
 	ASN_FETCH_A_FOR_AAAA_STATE,
+	ASN_FETCH_AAAA_FOR_A_STATE,
 
 	/**
 	 * Each time a delegation point changes for a given query or a 
@@ -380,7 +381,8 @@ struct iter_qstate {
 	 * return AAAA records or not.
 	 */
 	int fetch_a_for_aaaa;
-
+	int fetch_aaaa_for_a;
+	
 	/** list of pending queries to authoritative servers. */
 	struct outbound_list outlist;
 

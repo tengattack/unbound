@@ -1806,30 +1806,38 @@ processDSNSFind(struct module_qstate* qstate, struct iter_qstate* iq, int id)
  *         a SERVFAIL response because the query has hit a dead end.
  */
 static int
-asn_processQueryAAAA(struct module_qstate* qstate, struct iter_qstate* iq,
-	struct iter_env* ie, int id)
+asn_processQuery(struct module_qstate* qstate, struct iter_qstate* iq,
+	struct iter_env* ie, int id, uint16_t rr_type)
 {
 	struct module_qstate* subq = NULL;
 
-	log_assert(iq->fetch_a_for_aaaa == 0);
+	if (rr_type == LDNS_RR_TYPE_A) {
+		log_assert(iq->fetch_a_for_aaaa == 0);
 
-	/* flag the query properly in order to not loop */
-	iq->fetch_a_for_aaaa = 1;
+		/* flag the query properly in order to not loop */
+		iq->fetch_a_for_aaaa = 1;
+	} else {
+		log_assert(iq->fetch_aaaa_for_a == 0);
+
+		/* flag the query properly in order to not loop */
+		iq->fetch_aaaa_for_a = 1;
+	}
+	
 
 	/* re-throw same query, but with a different type */
 	if(!generate_sub_request(iq->qchase.qname,
-        	iq->qchase.qname_len, LDNS_RR_TYPE_A,
+        	iq->qchase.qname_len, rr_type,
 		iq->qchase.qclass, qstate, id, iq,
 		INIT_REQUEST_STATE, FINISHED_STATE, &subq, 1)) {
 		log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: failed "
 			"preloading of A record for",
-			iq->qchase.qname, LDNS_RR_TYPE_A,
+			iq->qchase.qname, rr_type,
 			iq->qchase.qclass);
 		return error_response(qstate, id, LDNS_RCODE_SERVFAIL);
 	}
 	log_nametypeclass(VERB_ALGO, "ASN-AAAA-filter: "
 		"preloading records in cache for",
-		iq->qchase.qname, LDNS_RR_TYPE_A,
+		iq->qchase.qname, rr_type,
 		iq->qchase.qclass);
 
 	/* set this query as waiting */
@@ -1889,6 +1897,10 @@ processQueryTargets(struct module_qstate* qstate, struct iter_qstate* iq,
 	if((ie->aaaa_filter == 1) && (iq->qchase.qtype == LDNS_RR_TYPE_AAAA) &&
 		(iq->fetch_a_for_aaaa == 0)) {
 		return next_state(iq, ASN_FETCH_A_FOR_AAAA_STATE);
+	}
+	if((ie->aaaa_filter == 2) && (iq->qchase.qtype == LDNS_RR_TYPE_A) &&
+		(iq->fetch_aaaa_for_a == 0)) {
+		return next_state(iq, ASN_FETCH_AAAA_FOR_A_STATE);
 	}
 	/* ASN: End of added code */
 
@@ -3099,8 +3111,8 @@ processFinished(struct module_qstate* qstate, struct iter_qstate* iq,
  * @param forq: super query state.
  */
 static void
-asn_processAAAAResponse(struct module_qstate* qstate, int id,
-	struct module_qstate* super)
+asn_processResponse(struct module_qstate* qstate, int id,
+	struct module_qstate* super, uint16_t rr_type)
 {
 	struct iter_qstate* iq = (struct iter_qstate*)qstate->minfo[id];
 	struct iter_qstate* super_iq = (struct iter_qstate*)super->minfo[id];
@@ -3108,7 +3120,11 @@ asn_processAAAAResponse(struct module_qstate* qstate, int id,
 	struct delegpt_ns* dpns = NULL;
 	int error = (qstate->return_rcode != LDNS_RCODE_NOERROR);
 
-	log_assert(super_iq->fetch_a_for_aaaa > 0);
+	if (rr_type == LDNS_RR_TYPE_A) {
+		log_assert(super_iq->fetch_a_for_aaaa > 0);
+	} else {
+		log_assert(super_iq->fetch_aaaa_for_a > 0);
+	}
 
 	/* let super go to evaluation of targets after this */
 	super_iq->state = QUERYTARGETS_STATE;
@@ -3164,7 +3180,10 @@ iter_inform_super(struct module_qstate* qstate, int id,
 		processDSNSResponse(qstate, id, super);
 	else if (super->qinfo.qtype == LDNS_RR_TYPE_AAAA && ((struct iter_qstate*)
 		super->minfo[id])->state == ASN_FETCH_A_FOR_AAAA_STATE)
-		asn_processAAAAResponse(qstate, id, super);
+		asn_processResponse(qstate, id, super, LDNS_RR_TYPE_A);
+	else if (super->qinfo.qtype == LDNS_RR_TYPE_A && ((struct iter_qstate*)
+		super->minfo[id])->state == ASN_FETCH_AAAA_FOR_A_STATE)
+		asn_processResponse(qstate, id, super, LDNS_RR_TYPE_AAAA);
 	else if(qstate->return_rcode != LDNS_RCODE_NOERROR)
 		error_supers(qstate, id, super);
 	else if(qstate->is_priming)
@@ -3203,7 +3222,10 @@ iter_handle(struct module_qstate* qstate, struct iter_qstate* iq,
 				cont = processInitRequest3(qstate, iq, id);
 				break;
 			case ASN_FETCH_A_FOR_AAAA_STATE:
-				cont = asn_processQueryAAAA(qstate, iq, ie, id);
+				cont = asn_processQuery(qstate, iq, ie, id, LDNS_RR_TYPE_A);
+				break;
+			case ASN_FETCH_AAAA_FOR_A_STATE:
+				cont = asn_processQuery(qstate, iq, ie, id, LDNS_RR_TYPE_AAAA);
 				break;
 			case QUERYTARGETS_STATE:
 				cont = processQueryTargets(qstate, iq, ie, id);
@@ -3516,6 +3538,8 @@ iter_state_to_string(enum iter_state state)
 		return "INIT REQUEST STATE (stage 3)";
 	case ASN_FETCH_A_FOR_AAAA_STATE:
 		return "ASN_FETCH_A_FOR_AAAA_STATE";
+	case ASN_FETCH_AAAA_FOR_A_STATE:
+		return "ASN_FETCH_AAAA_FOR_A_STATE";
 	case QUERYTARGETS_STATE :
 		return "QUERY TARGETS STATE";
 	case PRIME_RESP_STATE :
@@ -3541,6 +3565,7 @@ iter_state_is_responsestate(enum iter_state s)
 		case INIT_REQUEST_2_STATE :
 		case INIT_REQUEST_3_STATE :
 		case ASN_FETCH_A_FOR_AAAA_STATE :
+		case ASN_FETCH_AAAA_FOR_A_STATE :
 		case QUERYTARGETS_STATE :
 		case COLLECT_CLASS_STATE :
 			return 0;
